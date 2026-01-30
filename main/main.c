@@ -17,17 +17,15 @@
 #define ADC_ATTEN ADC_ATTEN_DB_12                   //ADC Attenuation
 #define BITWIDTH ADC_BITWIDTH_12                    //ADC Bitwidth
 
-#define TestLed GPIO_NUM_17
-
 
 bool running = 0;                                   //Variable to track when car is running
 bool reset = 1;                                     //Variable to track when the system has reset
 bool error = 0;                                     //Variable for when the alarm should sound
 bool ran = 1;                                       //Variable to track if engine just started
-bool autoLights = 0;
-bool on = 0;
-int counterOn = 0;
-int counterOff = 0;
+bool autoLights = 0;                                //Variable to set the headlights to AUTO
+bool on = 0;                                        //Variable to set the headlights to ON
+int counterOn = 0;                                  //Counter used to turn headlights on after a 1sec delay
+int counterOff = 0;                                 //Counter used to turn headlights off after a 2sec delay
 
 
 //Configured for active high
@@ -78,14 +76,13 @@ void run() {
 
 //Interupt function for when transmission is pressed
 void IRAM_ATTR gpio_isr_handler(void* arg) {
-    gpio_set_level(TestLed, 1);
-    if (ready() == 1 && running == 0) {
-        running = 1;
-    } else if (running == 1) {
+    if (ready() == 1 && running == 0) {             //Start engine if all conditions met
+        running = 1;    
+    } else if (running == 1) {                      //Stop engine if it is running
         reset = 1;
         ran = 1;
         running = 0;
-    } else {
+    } else {                                        //Sound the alarm and print error messages if conditions not met
         error = 1;
     }
 }
@@ -125,9 +122,6 @@ void app_main(void) {
     //Configure gLED pin
     gpio_reset_pin(gLED);
     gpio_set_direction(gLED, GPIO_MODE_OUTPUT);
-
-    gpio_reset_pin(TestLed);
-    gpio_set_direction(TestLed, GPIO_MODE_OUTPUT);
 
     //Configure rLED pin
     gpio_reset_pin(rLED);
@@ -169,62 +163,58 @@ void app_main(void) {
     (&cali_config, &adc1_cali_chan_handle);
 
     while(1) {                                          //Start the actual process
-        if (reset == 1) {
-            //printf("reset\n");
+        if (reset == 1) {                               //Reset the system
             gpio_set_level(rLED, 0);
             welcome();
         }
-        if (ready() == 1) {
+        if (ready() == 1) {                             //Turn on green LED if all conditions met
             gpio_set_level(gLED, 1);
-        } else {
+        } else {                                        //Turn off green LED if conditions not met
             gpio_set_level(gLED, 0);
         }
         while(running == 1) {
-            gpio_set_level(TestLed, 0);
-            run();
+            run();                                      //Run function for starting the car
 
-            int selector_adc_bits;
-            int selector_adc_mV;
-            int lsensor_adc_bits;
-            int lsensor_adc_mV;
+            int selector_adc_bits;                      //Variable for potentiometer input adc bits
+            int selector_adc_mV;                        //Variable for potentiometer adc bits in mV
+            int lsensor_adc_bits;                       //Variable for light sensor input adc bits
+            int lsensor_adc_mV;                         //Variable for light sensor adc bits in mV
 
-            adc_oneshot_read
+            adc_oneshot_read                            //Get potentiometer input bits and make them mV
             (adc1_handle, selector, &selector_adc_bits);
         
             adc_cali_raw_to_voltage
             (adc1_cali_chan_handle, selector_adc_bits, &selector_adc_mV);
 
-            adc_oneshot_read
+            adc_oneshot_read                            //Get light sensor input bits and make them mV
             (adc1_handle, lsensor, &lsensor_adc_bits);
         
             adc_cali_raw_to_voltage
             (adc1_cali_chan_handle, lsensor_adc_bits, &lsensor_adc_mV);
 
+
+            //Sets headlights to the proper mode based on the potentiometer readings
             if (selector_adc_mV < 1000) {
                 autoLights = 1;
                 on = 0;
-                printf("AUTO LIGHTS\n");
             } else if (selector_adc_mV < 2200 && selector_adc_mV >= 1000) {
                 autoLights = 0;
                 on = 1;
-                printf("LIGHTS ON\n");
             } else {
                 on = 0;
                 autoLights = 0;
-                printf("LIGHTS OFF\n");
             }
 
+            //Handles AUTO headlights behaviour
             if (autoLights == 1) {
-                //gpio_set_level(headlights, 0);
-                printf("%d\n",lsensor_adc_mV);
-                if (lsensor_adc_mV >= 1500) {
+                if (lsensor_adc_mV >= 1500) {           //Turns headlights on after 1 second if dim outside
                     counterOff = 0;
                     if (counterOn >= 50) {
                         gpio_set_level(headlights, 1);
                         counterOn = 0;
                     }
                     counterOn++;
-                } else {
+                } else {                                //Turns headlights off after 2 seconds if bright outside
                     counterOn = 0;
                     if (counterOff >= 100) {
                         gpio_set_level(headlights, 0);
@@ -232,19 +222,18 @@ void app_main(void) {
                     }
                     counterOff++;
                 }
-            } else if (on == 1) {
+            } else if (on == 1) {                       //Turns headlights ON
                 gpio_set_level(headlights, 1);
                 counterOn = 0;
                 counterOff = 0;
-            } else {
+            } else {                                    //Turns headlights OFF
                 gpio_set_level(headlights, 0);
                 counterOn = 0;
                 counterOff = 0;
             }
             vTaskDelay(20/portTICK_PERIOD_MS);
-            //printf("Running? -- %d\n",running);
         }
-        if (error == 1) {
+        if (error == 1) {                               //Reset the system and sound the alarm
             print_status();
             gpio_set_level(alarm, 1);
             vTaskDelay(500/portTICK_PERIOD_MS);
@@ -252,7 +241,6 @@ void app_main(void) {
             error = 0;
             reset = 1;
         }
-        //printf("Running? -- %d\n",running);
         vTaskDelay(20/portTICK_PERIOD_MS);
     }
 }
